@@ -3,10 +3,12 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"internal/database"
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -56,6 +58,7 @@ func main() {
 
 	subr1 := chi.NewRouter()
 	subr1.Post("/users", apiCfg.handleUserCreate)
+	subr1.Get("/users", apiCfg.handleGetUserApiKey)
 	subr1.Get("/readiness", handleReadiness)
 	subr1.Get("/err", handleErr)
 	router.Mount("/v1", subr1)
@@ -69,6 +72,7 @@ func main() {
 	log.Fatal(srv.ListenAndServe())
 }
 
+// helper functions
 func respondWithError(w http.ResponseWriter, code int, msg string) {
 	if code > 499 {
 		log.Printf("Responding with 5XX error: %s", msg)
@@ -91,6 +95,35 @@ func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
 	}
 	w.WriteHeader(code)
 	w.Write(dat)
+}
+
+func getApiKey(r *http.Request) (string, error) {
+	apiHeader := r.Header.Get("Authorization")
+	if apiHeader == "" {
+		return "", errors.New("API Key not included")
+	}
+
+	tempSlice := strings.Split(apiHeader, " ")
+	if len(tempSlice) < 2 || tempSlice[0] != "ApiKey" {
+		return "", errors.New("Malformed Authorization header")
+	}
+
+	return tempSlice[1], nil
+}
+
+// handler functions
+func (cfg *apiConfig) handleGetUserApiKey(w http.ResponseWriter, r *http.Request) {
+	apiKey, err := getApiKey(r)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, err.Error())
+	}
+
+	user, err := cfg.DB.GetUserByApiKey(r.Context(), apiKey)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, err.Error())
+	}
+
+	respondWithJSON(w, http.StatusOK, user)
 }
 
 func (cfg *apiConfig) handleUserCreate(w http.ResponseWriter, r *http.Request) {
@@ -120,7 +153,7 @@ func (cfg *apiConfig) handleUserCreate(w http.ResponseWriter, r *http.Request) {
 	respondWithJSON(w, http.StatusOK, user)
 }
 
-// Dummy programs
+// Dummy functions
 func handleReadiness(w http.ResponseWriter, r *http.Request) {
 	type Ready struct {
 		Status string `json:"status"`
