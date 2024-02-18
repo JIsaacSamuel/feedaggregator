@@ -61,9 +61,10 @@ func main() {
 	subr1 := chi.NewRouter()
 	subr1.Post("/users", apiCfg.handleUserCreate)
 	subr1.Get("/users", apiCfg.middlewareAuth(apiCfg.handleGetUserApiKey))
+	subr1.Post("/feeds", apiCfg.middlewareAuth(apiCfg.handleCreateFeed))
+	subr1.Get("/allfeeds", apiCfg.handleListAllFeeds)
 	subr1.Get("/readiness", handleReadiness)
 	subr1.Get("/err", handleErr)
-	subr1.Post("/feeds", apiCfg.middlewareAuth(apiCfg.handleCreateFeed))
 	router.Mount("/v1", subr1)
 
 	srv := http.Server{
@@ -122,6 +123,15 @@ func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
 }
 
 // handler functions
+func (cfg *apiConfig) handleListAllFeeds(w http.ResponseWriter, r *http.Request) {
+	feeds, err := cfg.DB.NumerateFeed(r.Context())
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, err.Error())
+	}
+
+	respondWithJSON(w, http.StatusOK, feeds)
+}
+
 func (cfg *apiConfig) handleCreateFeed(w http.ResponseWriter, r *http.Request, user database.User) {
 	type parameters struct {
 		Name string `json:"name"`
