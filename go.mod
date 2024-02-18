@@ -11,7 +11,9 @@ require (
 require github.com/lib/pq v1.10.9
 
 require internal/database v1.0.0
+require internal/auth v1.0.0
 
 require github.com/google/uuid v1.6.0
 
 replace internal/database => ./internal/database
+replace internal/auth => ./internal/auth

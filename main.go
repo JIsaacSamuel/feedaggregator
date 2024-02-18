@@ -3,12 +3,11 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
-	"errors"
+	"internal/auth"
 	"internal/database"
 	"log"
 	"net/http"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -39,6 +38,9 @@ func main() {
 	}
 
 	db, err := sql.Open("postgres", dbURL)
+	if err != nil {
+		log.Fatal(err.Error())
+	}
 
 	dbQueries := database.New(db)
 
@@ -58,9 +60,10 @@ func main() {
 
 	subr1 := chi.NewRouter()
 	subr1.Post("/users", apiCfg.handleUserCreate)
-	subr1.Get("/users", apiCfg.handleGetUserApiKey)
+	subr1.Get("/users", apiCfg.middlewareAuth(apiCfg.handleGetUserApiKey))
 	subr1.Get("/readiness", handleReadiness)
 	subr1.Get("/err", handleErr)
+	subr1.Post("/feeds", apiCfg.middlewareAuth(apiCfg.handleCreateFeed))
 	router.Mount("/v1", subr1)
 
 	srv := http.Server{
@@ -70,6 +73,27 @@ func main() {
 
 	log.Printf("Serving on port: %s\n", PORT)
 	log.Fatal(srv.ListenAndServe())
+}
+
+// middleware
+type authedHandler func(http.ResponseWriter, *http.Request, database.User)
+
+func (cfg *apiConfig) middlewareAuth(handler authedHandler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		apiKey, err := auth.GetAPIKey(r.Header)
+		if err != nil {
+			respondWithError(w, http.StatusUnauthorized, "Couldn't find api key")
+			return
+		}
+
+		user, err := cfg.DB.GetUserByApiKey(r.Context(), apiKey)
+		if err != nil {
+			respondWithError(w, http.StatusNotFound, "Couldn't get user")
+			return
+		}
+
+		handler(w, r, user)
+	}
 }
 
 // helper functions
@@ -97,32 +121,39 @@ func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
 	w.Write(dat)
 }
 
-func getApiKey(r *http.Request) (string, error) {
-	apiHeader := r.Header.Get("Authorization")
-	if apiHeader == "" {
-		return "", errors.New("API Key not included")
+// handler functions
+func (cfg *apiConfig) handleCreateFeed(w http.ResponseWriter, r *http.Request, user database.User) {
+	type parameters struct {
+		Name string `json:"name"`
+		URL  string `json:"url"`
 	}
 
-	tempSlice := strings.Split(apiHeader, " ")
-	if len(tempSlice) < 2 || tempSlice[0] != "ApiKey" {
-		return "", errors.New("Malformed Authorization header")
+	decoder := json.NewDecoder(r.Body)
+	params := parameters{}
+	err := decoder.Decode(&params)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't decode parameters")
+		return
 	}
 
-	return tempSlice[1], nil
+	feed, err := cfg.DB.CreateFeed(r.Context(), database.CreateFeedParams{
+		ID:        uuid.New(),
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+		UserID:    user.ID,
+		Name:      params.Name,
+		Url:       params.URL,
+	})
+
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't create feed")
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, feed)
 }
 
-// handler functions
-func (cfg *apiConfig) handleGetUserApiKey(w http.ResponseWriter, r *http.Request) {
-	apiKey, err := getApiKey(r)
-	if err != nil {
-		respondWithError(w, http.StatusBadRequest, err.Error())
-	}
-
-	user, err := cfg.DB.GetUserByApiKey(r.Context(), apiKey)
-	if err != nil {
-		respondWithError(w, http.StatusBadRequest, err.Error())
-	}
-
+func (cfg *apiConfig) handleGetUserApiKey(w http.ResponseWriter, r *http.Request, user database.User) {
 	respondWithJSON(w, http.StatusOK, user)
 }
 
