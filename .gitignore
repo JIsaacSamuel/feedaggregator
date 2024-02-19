@@ -1,3 +1,2 @@
-configs.env
-
-feedaggregator.exe
+*.exe
+*.env

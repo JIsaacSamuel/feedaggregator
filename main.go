@@ -63,6 +63,9 @@ func main() {
 	subr1.Get("/users", apiCfg.middlewareAuth(apiCfg.handleGetUserApiKey))
 	subr1.Post("/feeds", apiCfg.middlewareAuth(apiCfg.handleCreateFeed))
 	subr1.Get("/allfeeds", apiCfg.handleListAllFeeds)
+	subr1.Post("/feed_follows", apiCfg.middlewareAuth(apiCfg.handleCreateFeedFollow))
+	subr1.Delete("/feed_follows/{feedFollowID}", apiCfg.middlewareAuth(apiCfg.handleDeleteFeedFollow))
+	subr1.Get("/feed_follows", apiCfg.middlewareAuth(apiCfg.handleListFeedFollow))
 	subr1.Get("/readiness", handleReadiness)
 	subr1.Get("/err", handleErr)
 	router.Mount("/v1", subr1)
@@ -123,6 +126,63 @@ func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
 }
 
 // handler functions
+func (cfg *apiConfig) handleCreateFeedFollow(w http.ResponseWriter, r *http.Request, user database.User) {
+	type parameters struct {
+		FeedID uuid.UUID `json:"feed_id"`
+	}
+
+	decoder := json.NewDecoder(r.Body)
+	params := parameters{}
+	err := decoder.Decode(&params)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't decode parameters")
+		return
+	}
+
+	feedfollow, err := cfg.DB.CreateFeedFollow(r.Context(), database.CreateFeedFollowParams{
+		ID:        uuid.New(),
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+		UserID:    user.ID,
+		FeedID:    params.FeedID,
+	})
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, err.Error())
+	}
+
+	respondWithJSON(w, http.StatusOK, feedfollow)
+}
+
+func (cfg *apiConfig) handleDeleteFeedFollow(w http.ResponseWriter, r *http.Request, user database.User) {
+	paramstr := chi.URLParam(r, "feedFollowID")
+	param, err := uuid.Parse(paramstr)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	err = cfg.DB.DeleteFeedFollow(r.Context(), database.DeleteFeedFollowParams{
+		ID:     param,
+		UserID: user.ID,
+	})
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, struct{}{})
+}
+
+func (cfg *apiConfig) handleListFeedFollow(w http.ResponseWriter, r *http.Request, user database.User) {
+	feedFollows, err := cfg.DB.ListFeedFollows(r.Context(), user.ID)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, feedFollows)
+}
+
 func (cfg *apiConfig) handleListAllFeeds(w http.ResponseWriter, r *http.Request) {
 	feeds, err := cfg.DB.NumerateFeed(r.Context())
 	if err != nil {
