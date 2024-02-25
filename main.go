@@ -11,6 +11,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -70,6 +71,7 @@ func main() {
 	subr1.Post("/feed_follows", apiCfg.middlewareAuth(apiCfg.handleCreateFeedFollow))
 	subr1.Delete("/feed_follows/{feedFollowID}", apiCfg.middlewareAuth(apiCfg.handleDeleteFeedFollow))
 	subr1.Get("/feed_follows", apiCfg.middlewareAuth(apiCfg.handleListFeedFollow))
+	subr1.Get("/posts", apiCfg.middlewareAuth(apiCfg.handlerPostsGet))
 	subr1.Get("/readiness", handleReadiness)
 	subr1.Get("/err", handleErr)
 	router.Mount("/v1", subr1)
@@ -212,6 +214,25 @@ func fetchFeed(feedURL string) (*RSSFeed, error) {
 }
 
 // handler functions
+func (cfg *apiConfig) handlerPostsGet(w http.ResponseWriter, r *http.Request, user database.User) {
+	limitStr := r.URL.Query().Get("limit")
+	limit := 10
+	if specifiedLimit, err := strconv.Atoi(limitStr); err == nil {
+		limit = specifiedLimit
+	}
+
+	posts, err := cfg.DB.GetPostsForUser(r.Context(), database.GetPostsForUserParams{
+		UserID: user.ID,
+		Limit:  int32(limit),
+	})
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't get posts for user")
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, posts)
+}
+
 func (cfg *apiConfig) handleCreateFeedFollow(w http.ResponseWriter, r *http.Request, user database.User) {
 	type parameters struct {
 		FeedID uuid.UUID `json:"feed_id"`
